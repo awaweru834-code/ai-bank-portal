@@ -2,7 +2,14 @@
 
 🚀 **Live Demo:** [Add your Vercel Link Here]
 
-*(Add a screenshot of your Bank Chat UI here)*
+* screenshot 
+LogIn portal
+<img width="958" height="436" alt="image" src="https://github.com/user-attachments/assets/230b3dac-891e-4d70-b9a6-c47158189185" />
+The AI-chat
+<img width="953" height="431" alt="image" src="https://github.com/user-attachments/assets/25f2fdbd-71de-4ab0-9b6f-2245d472c272" />
+The AI_policy_checker
+<img width="959" height="437" alt="image" src="https://github.com/user-attachments/assets/ee4400e9-b6a4-4eb3-81da-bfa19b582eff" />
+
 
 A full-stack banking application built to explore the challenges of integrating Large Language Models (LLMs) with secure, traditional database systems. 
 
