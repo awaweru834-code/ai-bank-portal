@@ -20,7 +20,7 @@ export default function BankPortal() {
 
   // 2. HANDLE FORM SUBMISSION
   const handleAuth = async (e) => {
-    e.preventDefault();
+    e.preventDefault(); // <-- This stops the 1990s page refresh bug!
     setIsLoading(true);
     
     try {
@@ -102,6 +102,7 @@ export default function BankPortal() {
         {/* THE TOGGLE BUTTON */}
         <div className="mt-6 text-center">
           <button 
+            type="button"
             onClick={() => setIsLoginMode(!isLoginMode)}
             className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
           >
