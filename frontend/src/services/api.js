@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = "https://ai-bank-portal.onrender.com";
 
 // 🛡️ THE COLD START CATCHER
 // If the server is sleeping, fetch() throws a specific "Failed to fetch" TypeError.

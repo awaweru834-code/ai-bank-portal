@@ -22,7 +22,7 @@ app = FastAPI(title="Enterprise Smart Bank & AI API")
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://172.19.208.1:3000", # The specific WSL network IP from your logs
+    "https://ai-bank-portal.vercel.app"  # <--- Add your live Vercel URL here!
 ]
 
 app.add_middleware(
