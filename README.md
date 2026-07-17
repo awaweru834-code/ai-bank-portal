@@ -1,6 +1,6 @@
 # Enterprise AI Bank Portal
 
-🚀 **Live Demo:** [Add your Vercel Link Here]
+🚀 **Live Demo:** [ai-bank-portal.vercel.app](https://ai-bank-portal.vercel.app/)
 
 * screenshot 
 LogIn portal
@@ -21,6 +21,12 @@ I built this project to move beyond simple AI chat scripts and architect a decou
 * **Backend (FastAPI & Python):** A decoupled API using SQLAlchemy for database operations and Passlib/Bcrypt for password hashing.
 * **AI Engine (Groq Llama 3):** Routes natural language queries to the correct tool (PostgreSQL or Pinecone) based on user intent.
 * **Security & Infrastructure:** Implements stateless JWT session management and SlowAPI rate limiting (5 req/min) to prevent abuse. Containerized using Docker for deployment consistency.
+## ☁️ Cloud Architecture & Deployment
+* **Frontend Hosting:** Vercel (Next.js / React / Tailwind)
+* **Backend Hosting:** Render (Python / FastAPI)
+* **Relational Database:** Neon (Serverless PostgreSQL)
+* **Vector Database:** Pinecone
+* **LLM Engine:** Groq (Llama-3-8b-instant)
 
 ## 🧠 How the System Works
 
