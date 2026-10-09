@@ -1,43 +1,75 @@
-import { useState } from "react";
-import { sendChatMessage } from "../services/api";
+import { useState, useEffect, useRef } from "react";
+import { getWebSocketUrl } from "../services/api";
 import Button from "./Button";
 
-export default function ChatInterface({ token, onLogout }) {
+export default function ChatInterface({ onLogout }) {
   const [messages, setMessages] = useState([
-    { role: "ai", text: "Welcome to the AI Portal. Select your assistant mode above." }
+    { role: "ai", text: "Welcome to the AI Assistant. How can I help you today?" }
   ]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
-  // Track which brain we are talking to
-  const [chatMode, setChatMode] = useState("bank");
+  const ws = useRef(null);
 
-  const handleSendMessage = async (e) => {
+  useEffect(() => {
+    const wsUrl = getWebSocketUrl();
+    
+    // Create a local variable so React Strict Mode doesn't confuse multiple connections
+    const socket = new WebSocket(wsUrl);
+    ws.current = socket;
+
+    socket.onmessage = (event) => {
+      const incomingText = event.data;
+      setIsLoading(false);
+
+      if (incomingText === "SESSION_EXPIRED") {
+        alert("Your secure session has expired. Please log in again.");
+        onLogout();
+        return;
+      }
+
+      if (incomingText === "[DONE]") return; 
+
+      setMessages((prevMessages) => {
+        const lastMsg = prevMessages[prevMessages.length - 1];
+
+        if (lastMsg.role === "user") {
+          return [...prevMessages, { role: "ai", text: incomingText }];
+        }
+
+        const updatedMessages = [...prevMessages];
+        updatedMessages[updatedMessages.length - 1] = {
+          ...lastMsg,
+          text: lastMsg.text + incomingText,
+        };
+        return updatedMessages;
+      });
+    };
+
+    socket.onerror = (error) => {
+      console.error("WebSocket Error:", error);
+      setIsLoading(false);
+      setMessages((prev) => [...prev, { role: "ai", text: "❌ Connection to server lost." }]);
+    };
+
+    // Clean up the exact socket instance created in this effect
+    return () => {
+      socket.close();
+    };
+  }, [onLogout]);
+
+  const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
-    const newMessages = [...messages, { role: "user", text: inputText }];
-    setMessages(newMessages);
+    setMessages((prev) => [...prev, { role: "user", text: inputText }]);
     setInputText("");
     setIsLoading(true);
 
-    try {
-      // Pass the chatMode to the API
-      const response = await sendChatMessage(inputText, token, chatMode);
-      
-      // Update with AI's reply
-      setMessages([...newMessages, { role: "ai", text: response.ai_reply || response }]);
-    } catch (error) {
-      // 🛑 THE 401 EXPIRY & COLD START INTERCEPTOR
-      if (error.message === "SESSION_EXPIRED") {
-        alert("Your secure session has expired. Please log in again.");
-        onLogout(); // Instantly kicks them out and wipes localStorage
-      } else {
-        // Handles standard errors AND the "Waking Up" cold start message
-        alert(error.message);
-        setMessages([...newMessages, { role: "ai", text: `❌ ${error.message}` }]);
-      }
-    } finally {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(inputText);
+    } else {
+      alert("Still connecting to server, please try again in a moment.");
       setIsLoading(false);
     }
   };
@@ -45,35 +77,13 @@ export default function ChatInterface({ token, onLogout }) {
   return (
     <div className="flex flex-col h-[80vh] w-full max-w-4xl bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-700/50 shadow-2xl overflow-hidden mt-8">
       
-      {/* Header with Logout */}
       <div className="flex justify-between items-center p-4 bg-slate-900/80 border-b border-slate-700/50">
-        <h2 className="text-xl font-bold text-white">Financial Assistant</h2>
+        <h2 className="text-xl font-bold text-white">AI Assistant (Live Connection)</h2>
         <button onClick={onLogout} className="text-sm text-slate-400 hover:text-white transition-colors">
           Secure Logout
         </button>
       </div>
 
-      {/* The Mode Toggle Switch */}
-      <div className="flex justify-center p-3 bg-slate-800/80 border-b border-slate-700/50 gap-2">
-        <button 
-          onClick={() => setChatMode("bank")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            chatMode === "bank" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30" : "bg-slate-700 text-slate-400 hover:bg-slate-600"
-          }`}
-        >
-          🏦 Bank Assistant
-        </button>
-        <button 
-          onClick={() => setChatMode("policy_checker")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            chatMode ===  "policy_checker"? "bg-purple-600 text-white shadow-lg shadow-purple-500/30" : "bg-slate-700 text-slate-400 hover:bg-slate-600"
-          }`}
-        >
-          📄 Policy Checker
-        </button>
-      </div>
-
-      {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth">
         {messages.map((msg, index) => (
           <div key={index} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -81,7 +91,7 @@ export default function ChatInterface({ token, onLogout }) {
               msg.role === "user" 
                 ? "bg-blue-600 text-white rounded-br-sm shadow-blue-500/20" 
                 : "bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm"
-            } shadow-lg`}>
+            } shadow-lg whitespace-pre-wrap`}>
               {msg.text}
             </div>
           </div>
@@ -89,20 +99,19 @@ export default function ChatInterface({ token, onLogout }) {
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-slate-800 text-slate-400 border border-slate-700 p-4 rounded-2xl rounded-bl-sm animate-pulse">
-              AI is thinking...
+              AI is typing...
             </div>
           </div>
         )}
       </div>
 
-      {/* Input Form */}
       <div className="p-4 bg-slate-900/80 border-t border-slate-700/50">
         <form onSubmit={handleSendMessage} className="flex gap-2">
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={chatMode === "bank" ? "Ask about your balance..." : "Ask about company policies..."}
+            placeholder="Ask me anything..."
             className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors"
             disabled={isLoading}
           />
