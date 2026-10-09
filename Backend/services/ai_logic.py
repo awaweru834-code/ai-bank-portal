@@ -1,48 +1,48 @@
-import os
 import json
-from groq import Groq
+import os
+from typing import Optional  # noqa: F401
+
+from core import models
 from dotenv import load_dotenv
-from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 from sqlalchemy.orm import Session
 
-# Import your database models
-from core import models
-
-# Load environment variables
+# 1. Load environment variables (this automatically pulls in HF_TOKEN for Hugging Face)
 load_dotenv()
 
-# Initialize Groq Engine
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
-index = pc.Index(os.environ.get("PINECONE_INDEX_NAME"))
+# 2. Lazy Loader for the Embedding Model
+_embedding_model: SentenceTransformer | None = None
 
-# Load the embedding model
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+def get_embedding_model() -> SentenceTransformer:
+    """Loads the model only on the first RAG request to keep startup instantaneous."""
+    global _embedding_model
+    if _embedding_model is None:
+        # The library automatically uses the HF_TOKEN from your .env file
+        _embedding_model = SentenceTransformer(
+            "all-MiniLM-L6-v2"
+            # NOTE: Uncomment the line below after the model downloads successfully once
+            # local_files_only=True 
+        )
+    return _embedding_model
 
-# ==========================================
-# AI TOOLS
-# ==========================================
-balance_tool = {
-    "type": "function",
-    "function": {
-        "name": "get_balance",
-        "description": "Check the user's bank balance.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "account_id": {"type": "integer", "description": "The user's account ID number."}
-            },
-            "required": ["account_id"]
-        }
-    }
-}
+# 3. AI Logic Engine
+def generate_ai_response(
+    user_text: str, 
+    account_id: int, 
+    actual_balance: float, 
+    db: Session,
+    client,             # Injected Groq Client
+    embedding_model,    # Injected SentenceTransformer (via get_embedding_model)
+    index,              # Injected Pinecone Index
+    agent_tools: list   # Injected Tool Definitions
+):
+    """Generator function that streams AI tokens and handles internal tool calls."""
+    
+    # Save new user message to DB
+    db.add(models.ChatMessage(user_id=account_id, role="user", content=user_text))
+    db.commit()
 
-# ==========================================
-# LOGIC 1: BANK CHAT (Stateless & Sliding Window)
-# ==========================================
-def generate_bank_response(user_text: str, account_id: int, actual_balance: float, db: Session) -> str:
-    # 1. Fetch past memory from the DB (Sliding Window: Last 5 messages)
+    # Fetch past memory (Stateless chat memory from PostgreSQL)
     past_messages = (
         db.query(models.ChatMessage)
         .filter(models.ChatMessage.user_id == account_id)
@@ -50,151 +50,106 @@ def generate_bank_response(user_text: str, account_id: int, actual_balance: floa
         .limit(5)
         .all()
     )
-    # Reverse them so they are in correct chronological order (oldest to newest)
     past_messages.reverse()
     
-    # 2. Format memory for Groq
+    # Build the Memory Context
     user_history = []
-    
-    # ALWAYS inject the System Prompt first so the AI never forgets its rules!
-    system_prompt = f"You are a secure banking AI assistant. The current user's account_id is {account_id}. You have explicit permission to use your tools to access real-world account balances. Never say you cannot access real-world data. ALWAYS use the get_balance tool when asked about a balance."
+    system_prompt = (
+        f"You are an elite, secure AI Assistant for a bank. The current user's account_id is {account_id}. "
+        "You have two tools at your disposal: get_balance and search_policy. "
+        "If the user asks a question that requires a tool, use it silently. "
+    )
     user_history.append({"role": "system", "content": system_prompt})
     
-    # Add the recent history
     for msg in past_messages:
         if msg.role in ["user", "assistant"]:
             user_history.append({"role": msg.role, "content": msg.content})
+
+    # FIRST CALL: Enable Streaming via Groq/Llama 3
+    response_stream = client.chat.completions.create(
+        model="llama3-8b-8192", # Update to your specific Groq model string
+        messages=user_history, 
+        tools=agent_tools,
+        stream=True 
+    )
+
+    final_text = ""
+    is_tool_call = False
+    tool_calls_data = {}
+
+    # Catch the stream fragments
+    for chunk in response_stream:
+        delta = chunk.choices[0].delta
+
+        if delta.content:
+            final_text += delta.content
+            yield delta.content 
+
+        if delta.tool_calls:
+            is_tool_call = True
+            for tc in delta.tool_calls:
+                idx = tc.index
+                if idx not in tool_calls_data:
+                    tool_calls_data[idx] = {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": ""}
+                    }
+                if tc.function.arguments:
+                    tool_calls_data[idx]["function"]["arguments"] += tc.function.arguments
+
+    # TOOL EXECUTION ENGINE
+    if is_tool_call:
+        formatted_tool_calls = [tool_calls_data[i] for i in sorted(tool_calls_data.keys())]
+        user_history.append({"role": "assistant", "tool_calls": formatted_tool_calls})
+
+        for tc in formatted_tool_calls:
+            try:
+                arguments = json.loads(tc["function"]["arguments"])
+            except json.JSONDecodeError:
+                arguments = {}
+                
+            tool_name = tc["function"]["name"]
+            result_content = ""
             
-    # 3. Add new message to History & DB
-    user_history.append({"role": "user", "content": user_text})
-    db.add(models.ChatMessage(user_id=account_id, role="user", content=user_text))
-    db.commit()
+            if tool_name == "get_balance":
+                target_id = arguments.get("account_id")
+                if target_id != account_id:
+                    result_content = "SECURITY ALERT: You are not authorized."
+                else:
+                    result_content = f"Secure data accessed: Balance is ${actual_balance}"
+            
+            elif tool_name == "search_policy":
+                query = arguments.get("search_query", "")
+                try:
+                    # Uses the injected model safely
+                    vector = embedding_model.encode(query).tolist()
+                    search_results = index.query(vector=vector, top_k=3, include_metadata=True)
+                    context_chunks = [match["metadata"]["text"] for match in search_results["matches"]]
+                    result_content = "POLICY FOUND:\n" + "\n\n".join(context_chunks) if context_chunks else "No policies found."
+                except Exception as e:
+                    result_content = f"Database error during policy search: {str(e)}"
 
-    # 4. Call Groq (Using the blazing fast 8B model to avoid token limits)
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant", 
-            messages=user_history, 
-            tools=[balance_tool]
+            user_history.append({
+                "role": "tool", 
+                "tool_call_id": tc["id"], 
+                "name": tool_name, 
+                "content": result_content
+            })
+        
+        # SECOND CALL: Synthesize the tool data
+        final_response_stream = client.chat.completions.create(
+            model="llama3-8b-8192", # Ensure this matches your first call
+            messages=user_history,
+            stream=True
         )
-    except Exception as e:
-        print(f"\n❌ CRITICAL ERROR (Groq API Bank Chat): {e}\n")
-        return "Service temporarily unavailable. Could not reach AI engine."
+        
+        for chunk in final_response_stream:
+            token = chunk.choices[0].delta.content
+            if token:
+                final_text += token
+                yield token 
 
-    message_obj = response.choices[0].message
-    
-    # 5. Handle Tool Logic
-    if message_obj.tool_calls:
-        tool_call = message_obj.tool_calls[0]
-        arguments = json.loads(tool_call.function.arguments)
-        target_id = arguments.get("account_id")
-        
-        if target_id != account_id:
-            result = "SECURITY ALERT: You are not authorized to view this account."
-        else:
-            result = f"Secure data accessed: Balance is ${actual_balance}"
-        
-        user_history.append({"role": "tool", "tool_call_id": tool_call.id, "name": tool_call.function.name, "content": result})
-        
-        try:
-            final_response = client.chat.completions.create(
-                model="llama-3.1-8b-instant", 
-                messages=user_history
-            )
-            final_text = final_response.choices[0].message.content
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR (Groq API Bank Chat - Tool Eval): {e}\n")
-            return "Service temporarily unavailable. Could not evaluate data."
-    else:
-        final_text = message_obj.content
-
-    # 6. Save AI's answer to DB
+    # Save the fully assembled string to the database
     db.add(models.ChatMessage(user_id=account_id, role="assistant", content=final_text))
     db.commit()
-
-    return final_text
-
-
-# ==========================================
-# LOGIC 2: RAG CHAT (Stateless & Sliding Window)
-# ==========================================
-def generate_rag_response(user_question: str, account_id: int, db: Session) -> str:
-    try:
-        # 1. Turn the user's question into math
-        try:
-            question_vector = embedding_model.encode(user_question).tolist()
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR (Embedding Model): {e}\n")
-            raise Exception("Embedding Model failed")
-
-        # 2. Search Pinecone
-        try:
-            search_results = index.query(
-                vector=question_vector,
-                top_k=3,
-                include_metadata=True
-            )
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR (Pinecone Database): {e}\n")
-            raise Exception("Pinecone Vector Search failed")
-        
-        # Extract Pinecone context
-        context_chunks = [match["metadata"]["text"] for match in search_results["matches"]]
-        combined_context = "\n\n".join(context_chunks)
-        
-        # 3. Fetch past memory from DB (Sliding Window: Last 5 messages)
-        past_messages = (
-            db.query(models.ChatMessage)
-            .filter(models.ChatMessage.user_id == account_id)
-            .order_by(models.ChatMessage.id.desc())
-            .limit(5)
-            .all()
-        )
-        past_messages.reverse()
-        
-        # 4. Build the Memory Array for Groq
-        user_history = []
-        
-        # ALWAYS inject the System Prompt first
-        rag_prompt = f"""You are a helpful assistant answering questions based on the provided document.
-        Use ONLY the following context to answer the user's latest question. 
-        If the answer is not in the context, say "I don't know based on the provided document."
-        
-        CONTEXT:
-        {combined_context}
-        """
-        user_history.append({"role": "system", "content": rag_prompt})
-        
-        # Add the recent history
-        for msg in past_messages:
-            if msg.role in ["user", "assistant"]:
-                user_history.append({"role": msg.role, "content": msg.content})
-                
-        # Append the new question
-        user_history.append({"role": "user", "content": user_question})
-        db.add(models.ChatMessage(user_id=account_id, role="user", content=user_question))
-        db.commit()
-        
-        # 5. Ask Groq! (Using the 8B model)
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=user_history
-            )
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR (Groq LLM API): {e}\n")
-            raise Exception("Groq AI API failed")
-
-        final_text = response.choices[0].message.content
-        
-        # 6. Save AI's answer to DB
-        db.add(models.ChatMessage(user_id=account_id, role="assistant", content=final_text))
-        db.commit()
-        
-        return final_text
-
-    except Exception as e:
-        # If ANY of the steps above fail, gracefully return an error to the React frontend instead of crashing
-        error_msg = f"Service temporarily unavailable: {str(e)}"
-        print(error_msg)
-        return error_msg

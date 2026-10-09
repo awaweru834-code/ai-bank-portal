@@ -1,18 +1,16 @@
-from fastapi import FastAPI
+from core import models
+from core.database import (
+    engine,
+    get_db,  # Your database dependency
+)
+from core.rate_limiter import limiter
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from routers import ai_chat, bank
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-
-from core.database import engine
-from core import models
-from core.rate_limiter import limiter
-
-from routers import bank, ai_chat
-
-from fastapi import Depends, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy import text
-from core.database import get_db # Your database dependency
+from sqlalchemy.orm import Session
 
 print("Booting up database engine...")
 models.Base.metadata.create_all(bind=engine)
