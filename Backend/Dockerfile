@@ -17,4 +17,5 @@ COPY . /code/
 EXPOSE 8000
 
 # 7. The boot-up command
-CMD ["fastapi", "run", "main.py", "--port", "8000"]
+# 7. The boot-up command
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
