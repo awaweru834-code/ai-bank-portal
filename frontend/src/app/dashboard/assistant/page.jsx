@@ -1,80 +1,68 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { getWebSocketUrl } from "@/services/api";
+import { getChatHistory, sendChatMessage } from "@/services/api";
 
 export default function AssistantPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   
-  const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // 1. Establish Secure WebSocket Connection on Mount
+  // 1. Fetch History on Mount (Axios REST)
   useEffect(() => {
-    // The browser automatically attaches your HttpOnly cookie to this request
-    const wsUrl = getWebSocketUrl();
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setIsConnected(true);
-      setMessages([{ role: "ai", content: "Hello. I am Hank, your autonomous institutional assistant. How can I manage your vault today?" }]);
-    };
-
-    ws.onmessage = (event) => {
-      const data = event.data;
-      
-      if (data === "[DONE]") {
-        setIsTyping(false);
-        return;
-      }
-      
-      if (data === "SESSION_EXPIRED" || data === "UNAUTHORIZED: Missing secure cookie") {
-        window.location.href = "/login";
-        return;
-      }
-
-      // Append streaming tokens to the last AI message
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        const lastMsg = newMessages[newMessages.length - 1];
-        
-        if (lastMsg && lastMsg.role === "ai" && isTyping) {
-          lastMsg.content += data;
+    const loadHistory = async () => {
+      try {
+        const history = await getChatHistory();
+        if (history && history.length > 0) {
+          // Normalize backend "assistant" roles to frontend "ai" roles for styling
+          const formattedHistory = history.map(msg => ({
+            ...msg,
+            role: msg.role === "assistant" ? "ai" : msg.role
+          }));
+          setMessages(formattedHistory);
         } else {
-          newMessages.push({ role: "ai", content: data });
+          setMessages([{ role: "ai", content: "Hello. I am Hank, your autonomous institutional assistant. How can I manage your vault today?" }]);
         }
-        return newMessages;
-      });
+      } catch (error) {
+        console.error("Failed to fetch chat history:", error);
+      }
     };
-
-    ws.onclose = () => setIsConnected(false);
-
-    return () => {
-      if (ws.readyState === 1) ws.close();
-    };
-  }, [isTyping]);
+    
+    loadHistory();
+  }, []);
 
   // 2. Auto-scroll to the latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // 3. Handle Message Submission
-  const sendMessage = (e) => {
+  // 3. Handle Message Submission (Axios REST)
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== 1) return;
+    if (!input.trim() || isTyping) return;
 
-    // Add user message to UI
-    setMessages((prev) => [...prev, { role: "user", content: input }]);
+    const userText = input;
     
-    // Send over WebSocket
-    wsRef.current.send(input);
+    // Add user message to UI instantly and clear input
+    setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setInput("");
     setIsTyping(true);
+
+    try {
+      // Send the POST request to FastAPI
+      const response = await sendChatMessage(userText);
+      
+      // Append the AI's response to the chat
+      setMessages((prev) => [...prev, { role: "ai", content: response.content }]);
+    } catch (error) {
+      // Catch rate limits or network failures gracefully
+      const errorMsg = error.message || "Network error. Please try again.";
+      setMessages((prev) => [...prev, { role: "ai", content: ` ${errorMsg}` }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
@@ -84,14 +72,15 @@ export default function AssistantPage() {
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <span className="text-xl">🤖</span> Hank Bank AI
+            <span className="text-xl"></span> Hank Bank AI
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">Equipped with RAG Policy Retrieval & Live Vault Access</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"}`}></div>
+          {/* Static green dot since standard REST is always "online" */}
+          <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            {isConnected ? "Secure Line Open" : "Disconnected"}
+            System Online
           </span>
         </div>
       </div>
@@ -124,19 +113,19 @@ export default function AssistantPage() {
       </div>
 
       {/* Input Area */}
-      <form onSubmit={sendMessage} className="p-4 bg-white border-t border-slate-100">
+      <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-100">
         <div className="relative flex items-center">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={!isConnected || isTyping}
-            placeholder={isConnected ? "Ask Hank to check your balance or query a policy..." : "Connecting to secure line..."}
+            disabled={isTyping}
+            placeholder="Ask Hank to check your balance or query a policy..."
             className="w-full pl-4 pr-12 py-3.5 bg-slate-100 border-none rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all disabled:opacity-50 text-slate-900 placeholder-slate-400"
           />
           <button
             type="submit"
-            disabled={!isConnected || isTyping || !input.trim()}
+            disabled={isTyping || !input.trim()}
             className="absolute right-2 p-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:hover:bg-emerald-500 transition-colors shadow-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">

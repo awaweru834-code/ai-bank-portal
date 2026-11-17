@@ -1,18 +1,15 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 import bcrypt
-
-# 1. Import your database connection and models so the bouncer can look up users
-from core.database import get_db
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
-
 from fastapi.security import APIKeyCookie
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from core import models
+from core.database import get_db
 
 load_dotenv()
 
@@ -39,9 +36,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ==========================================
 def create_access_token(data: dict):
     to_encode = data.copy()
-    
-    # FIX: Use timezone.utc instead of the deprecated utcnow()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -50,25 +45,25 @@ def create_access_token(data: dict):
 # ==========================================
 # THE BOUNCER (Dependency)
 # ==========================================
-# 2. Tell FastAPI to look for a cookie named "access_token" instead of a header
+# 1. Instruct FastAPI to look in the cookie jar for "access_token"
 cookie_scheme = APIKeyCookie(name="access_token", auto_error=False)
 
 def get_current_user(token: str = Depends(cookie_scheme), db: Session = Depends(get_db)):
     """
-    This function intercepts the request, grabs the token from the HTTP cookie,
-    decodes it, and fetches the live user from the database.
+    Intercepts the request, extracts the JWT from the HttpOnly cookie,
+    validates the signature, and returns the live database user.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
     )
     
-    # 3. If no cookie is found, kick them out
+    # 2. If the browser didn't send the cookie, reject the request
     if not token:
         raise credentials_exception
         
     try:
-        # 4. Open the wristband (Remove "Bearer " if you stored it with the prefix)
+        # 3. Open the cryptographically signed wristband
         clean_token = token.replace("Bearer ", "") if token.startswith("Bearer ") else token
         payload = jwt.decode(clean_token, SECRET_KEY, algorithms=[ALGORITHM])
         
@@ -77,8 +72,10 @@ def get_current_user(token: str = Depends(cookie_scheme), db: Session = Depends(
             raise credentials_exception
             
     except JWTError:
+        # Fails if the token is expired or was tampered with
         raise credentials_exception
 
+    # 4. Fetch the verified user from PostgreSQL
     user = db.query(models.UserDB).filter(models.UserDB.username == username).first()
     
     if user is None:
