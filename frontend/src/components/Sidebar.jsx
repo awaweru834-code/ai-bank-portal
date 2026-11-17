@@ -1,10 +1,10 @@
 import Link from "next/link";
 
-export default function Sidebar({ collapsed, setCollapsed, pathname }) {
+export default function Sidebar({ collapsed, setCollapsed, pathname ,balance}) {
   const navItems = [
-    { label: "Overview", href: "/dashboard", icon: "🏦" },
-    { label: "Hank AI Assistant", href: "/dashboard/assistant", icon: "🤖" },
-    { label: "Settings", href: "/dashboard/settings", icon: "⚙️" },
+    { label: "Overview", href: "/dashboard", icon: "" },
+    { label: "Hank AI Assistant", href: "/dashboard/assistant", icon: "" },
+    { label: "Settings", href: "/dashboard/settings", icon: "" },
   ];
 
   return (
@@ -61,7 +61,7 @@ export default function Sidebar({ collapsed, setCollapsed, pathname }) {
         </div>
      ) : (
         <div className="w-10 h-10 rounded-xl bg-[#583D9E] text-white flex items-center justify-center font-bold text-xs mx-auto">
-          💳
+          
         </div>
      )}
       

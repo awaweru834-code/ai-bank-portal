@@ -52,7 +52,7 @@ export const loginUser = async (username, password) => {
     try {
         const formData = new URLSearchParams({ username, password });
 
-        const { data } = await api.post("/token", formData, {
+        const { data } = await api.post("/login", formData, {
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
         });
         
@@ -68,32 +68,45 @@ export const loginUser = async (username, password) => {
     }
 };
 
-// 3. The Chat Doorway
-export const sendChatMessage = async (message, mode = "bank") => {
-    try {
-        const endpoint = mode === "policy_checker" ? "/ask-pdf" : "/bank-chat";
-        const payload = mode === "policy_checker" 
-            ? { user_question: message } 
-            : { user_text: message };
 
-        const { data } = await api.post(endpoint, payload);
-        
+export const sendChatMessage = async (message) => {
+    try {
+        const { data } = await api.post("/ai/chat", { message: message });
         return data;
     } catch (error) {
-        throw error;
+        // If the rate limiter blocks it, throw a user-friendly error
+        if (error.response?.status === 429) {
+            throw new Error("Too many messages. Please wait a moment.");
+        }
+        throw new Error("Failed to send message.");
     }
 };
 
-// ==========================================
-// WEBSOCKET CONFIGURATION
-// ==========================================
-export const getWebSocketUrl = () => {
-    // If testing on localhost, use 'ws://'. 
-    // If deployed on Render, MUST use 'wss://' (secure).
-    
-    const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
-    
-    // DELETED the ?token= URL parameter!
-    // The browser automatically sends the HttpOnly cookie during the WebSocket handshake.
-    return `${WS_URL}/ws/chat`;
+
+// 3. The Chat History Doorway
+// Automatically fetches the last 10 messages from the database on page load
+export const getChatHistory = async () => {
+    try {
+        const { data } = await api.get("/ai/history");
+        return data;
+    } catch (error) {
+        console.error("Failed to load chat history:", error);
+        return []; // Return an empty array on failure so the UI doesn't crash
+    }
+};
+
+// 5. The Delete Account Doorway
+// Triggers the DELETE /users/me endpoint to wipe the user's data and terminate the session cookie
+export const deleteAccount = async () => {
+    try {
+        const { data } = await api.delete("/users/delete");
+        return data;
+    } catch (error) {
+        // Safely extract the FastAPI error message if one is provided
+        if (error.response?.data?.detail) {
+            throw new Error(error.response.data.detail);
+        }
+        // Fallback error message
+        throw new Error("Failed to delete account. Please try again later.");
+    }
 };

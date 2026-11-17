@@ -1,67 +1,37 @@
+import os
+
 from core import models
-from core.database import (
-    engine,
-    get_db,  # Your database dependency
-)
+from core.database import engine
+
+# Your decoupled modules
 from core.rate_limiter import limiter
-from fastapi import Depends, FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import ai_chat, bank
+from routers import ai_chat, banking
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import text
-from sqlalchemy.orm import Session
 
-print("Booting up database engine...")
+load_dotenv()
+
+# Creates the tables in PostgreSQL automatically on startup
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Enterprise Smart Bank & AI API")
-# Tell the browser these frontend URLs are safe
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://ai-bank-portal.vercel.app"  # <--- Add your live Vercel URL here!
-]
+app = FastAPI(title="Hank Bank API")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"], # Allows all methods like POST, GET, OPTIONS
-    allow_headers=["*"], # Allows all headers
-)
-
-
+# 1. Attach the Rate Limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.include_router(bank.router)
-app.include_router(ai_chat.router)
+# 2. Secure CORS Middleware for HttpOnly Cookies
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-def health_check():
-    return {"status": "All systems operational. Welcome to the Smart Bank."}
-@app.get("/wake-up", tags=["System"])
-def wake_up_services(db: Session = Depends(get_db)):
-    """
-    A lightweight Warm-Up Ping to eliminate Serverless Cold Starts.
-    This forces PostgreSQL (Neon) to spin up its compute instance.
-    """
-    try:
-        # Execute a practically invisible, zero-cost SQL command
-        db.execute(text("SELECT 1"))
-        
-        return {
-            "status": "awake", 
-            "message": "PostgreSQL engine is warm and ready."
-        }
-    except Exception as e:
-        # Print the exact error to the terminal so YOU can debug it
-        print(f"⚠️ Wake-up ping failed: {e}") 
-        
-        # Throw the clean 503 error for the USER
-        raise HTTPException(
-            status_code=503, 
-            detail="Services are currently waking up or unavailable."
-        )
-    
+# 3. Mount Routers
+app.include_router(banking.router)
+app.include_router(ai_chat.router)

@@ -62,19 +62,19 @@ export default function DashboardHome() {
         {/* Loan Cards (Inspired by reference UI) */}
         <div className="md:col-span-2 grid sm:grid-cols-3 gap-4">
           <div className="bg-slate-50/80 border border-slate-200/60 p-4 rounded-2xl shadow-sm">
-            <span className="text-xl">🏡</span>
+            <span className="text-xl"></span>
             <p className="text-xs text-slate-500 mt-2">Family house loan</p>
             <p className="text-base font-bold text-slate-900">-$120,000</p>
             <p className="text-[10px] text-slate-400">Balance owing</p>
           </div>
           <div className="bg-slate-50/80 border border-slate-200/60 p-4 rounded-2xl shadow-sm">
-            <span className="text-xl">🏛️</span>
+            <span className="text-xl"></span>
             <p className="text-xs text-slate-500 mt-2">Eurotrip loan</p>
             <p className="text-base font-bold text-slate-900">-$21,489</p>
             <p className="text-[10px] text-slate-400">Balance owing</p>
           </div>
           <div className="bg-slate-50/80 border border-slate-200/60 p-4 rounded-2xl shadow-sm">
-            <span className="text-xl">🚗</span>
+            <span className="text-xl"></span>
             <p className="text-xs text-slate-500 mt-2">Vehicle loan</p>
             <p className="text-base font-bold text-slate-900">-$2,312</p>
             <p className="text-[10px] text-slate-400">Balance owing</p>
@@ -93,7 +93,7 @@ export default function DashboardHome() {
           ].map((doc, idx) => (
             <div key={idx} className="py-3.5 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="text-slate-400">📄</span>
+                <span className="text-slate-400"></span>
                 <span className="font-medium text-slate-800">{doc.name}</span>
               </div>
               <div className="flex items-center gap-6">
