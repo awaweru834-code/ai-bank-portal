@@ -33,8 +33,8 @@ def login_for_access_token(
         key="access_token",
         value=access_token,
         httponly=True,      # Protects against XSS attacks
-        secure=False,       # Keep False for localhost testing. Change to True on Render/HTTPS.
-        samesite="lax",     # Protects against CSRF attacks
+        secure=True,       # Keep False for localhost testing. Change to True on Render/HTTPS.
+        samesite="none",     # Protects against CSRF attacks
         max_age=auth.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
     
