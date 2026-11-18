@@ -1,7 +1,7 @@
 import axios from "axios";
 
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || " https://ai-bank-portal-6.onrender.com";
 
 // 1. Create the Centralized Axios Engine
 export const api = axios.create({
